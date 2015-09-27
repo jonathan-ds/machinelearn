@@ -1,0 +1,112 @@
+---
+title: "Recognizing Qualitative Features of Weight Lifting Exercises"
+author: "Jonathan Graham"
+date: "Sunday, September 27, 2015"
+output: html_document
+---
+## Abstract
+Much human activity research has been research has been focused on using a sensor to identify which activity is being preformed.  In this paper we employ a random forest ensemble learning method in a cross-validation model to determine the quality of activity being performed to an accuracy of 98.3%
+
+
+## Introduction
+The idea of wearable computing devices has existed since the abacus ring of the Qing dynasty over 300 years ago.  Today billion dollar companies like Fitbit specialize in the design and development of these tools.  Given the ubiquity and declining price of these devices the potential exists for improving overall fitness. 
+
+## Methods
+We recruited six young healthy participants and asked them to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in each of five ways: Correctly (Class A), throwing their elbows to the front (Class B), lifting their dumbbell only halfway (Class C), lowering their dumbbell only halfway (Class D) and throwing their hips to the front (Class E).  Data was collected by an on-body sensor and stored in a comma separated value file.  
+
+## Analysis
+Using R version `r sprintf("%s.%s",R.Version()$major,R.Version()$minor)` we loaded the data and needed libraries.
+```{r warning=FALSE, message=FALSE}
+library(corrplot)
+library(caret)
+test_data <- read.csv("pml-testing.csv")
+train_data <- read.csv("pml-training.csv")
+features <- length(names(train_data))
+records <- length(train_data[,1])
+```
+Our training set consisted of `r features` features and `r records` records.
+
+## Cleaning Data
+A simple inspection of the data reveals columns that have significant numbers of NA fields.  
+```{r}
+sum(is.na(train_data))
+```
+These will add nothing to our analysis and slow down the model building.  So it's important to find and remove these features.
+```{r}
+na_columns = sapply(train_data,function(x) {sum(is.na(x))})
+clean_data <- train_data[,na_columns==0] 
+```
+Similarly there were a a considerable number of columns that are simply empty.
+```{r}
+sum(clean_data=="")
+```
+So we remove them
+```{r}
+blank_columns = sapply(clean_data,function(x) {sum(x=="")})
+cleaner_data <- clean_data[,blank_columns==0]
+```
+We also remove the data fields: `r names(cleaner_data)[1:7]` as they take no part in the analysis
+```{r}
+cleanest_data <- cleaner_data[,-c(1:7)]
+clean_features <- length(names(cleanest_data))
+```
+We now have a dataset with `r clean_features` which will form the basis of our analysis.  It's worth noting that none of these alterations count as transformations that need to be applied to the testing data set.
+
+## Exploratory Analysis
+We will be using a cross-validation technique to create our model and estimate it's out-of-sample error.  So we split our training data set 70/30 into subsets.  The first will be our training set and the second will be our validation set.  Our outcome variable is "classe".
+```{r}
+int_train_data <- createDataPartition(cleanest_data$classe, p = 0.7, list=FALSE)
+cross_train_data <- cleanest_data[int_train_data,]
+cross_validation_data <- cleanest_data[-int_train_data,]
+```
+Given the rather To get a sense of our resulting training set we will do a correlation matrix plot.
+```{r}
+correlation_matrix <- cor(cross_train_data[,-dim(cross_train_data)[2]],)
+corrplot(correlation_matrix, type="lower", order="hclust", method="square",tl.cex = 0.70, tl.col="blue", tl.srt = 45,col=topo.colors(200))
+```
+
+By looking at the colour you can see the direction of the correlation.  The size of the square tells us the strength of the correlation.  From the illustration above it can be seen that many variables exist which are only weakly correlated. To further simplify our model we will create a new dataset removing any correlates less than 0.5.
+```{r}
+weak_correlations <- findCorrelation(correlation_matrix, cutoff = 0.5)
+final_training_set <- cross_train_data[,-weak_correlations]
+final_features <- length(names(final_training_set))
+```
+Our training set now has only `r final_features` features.
+
+## Modeling Our Data
+
+As random forest modeling is computationally expensive.  We have configured the do parallel library and configured it to work with four cores.
+```{r warning=FALSE, message=FALSE}
+library(doParallel)
+registerDoParallel(cores=4)
+```
+Now we train our model
+```{r cache=TRUE,warning=FALSE, message=FALSE}
+model <- train(classe~., method = "rf", data=final_training_set, trControl = trainControl(method = "cv"), importance=TRUE)
+```
+
+## Validating Our Model
+We now use the data we set aside earlier to validate our model.  The confusion matrix function shows the correlation data and estimates the models accuracy.
+```{r warning=FALSE, message=FALSE}
+predictions <- predict(model, newdata=cross_validation_data)
+confusion_matrix <- confusionMatrix(predictions, cross_validation_data$classe)
+confusion_matrix$table
+accuracy <- sum((predictions==cross_validation_data$classe))/dim(cross_train_data)[1]
+```
+Our model has an accuracy of `r confusion_matrix$overall['Accuracy']`.  Out of model error is is estimated by subtracting this figure from 1.  So in this case our error is `r 1-confusion_matrix$overall['Accuracy']`
+
+## Conclusion
+
+Based on our research with on-body sensors there appears to be ample evidence to establish our ability to predict both the type and quality of fitness activities.  This may contribute to better fitness and greater value to the user.
+
+## Appendix A:
+Features used in our model
+```{r}
+names(final_training_set)
+```
+
+## Appendix B:
+R Environment Details
+```{r}
+sessionInfo()
+```
